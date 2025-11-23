@@ -184,7 +184,6 @@
                     {{ 'Owner' if user_type == 'owner' else 'Employee' }}
                 </span>
                 {% if user_type == 'owner' %}
-                    <a href="{{ url_for('manage') }}" class="btn btn-light btn-sm">Manage</a>
                     <a href="{{ url_for('settings') }}" class="btn btn-light btn-sm">Settings</a>
                 {% endif %}
                 <a href="{{ url_for('logout') }}" class="btn btn-light btn-sm">Logout</a>
@@ -216,21 +215,24 @@
                         <h5 class="mb-0">📦 Product Details</h5>
                     </div>
                     <div class="product-info">
-                        <p><strong>Product No:</strong> {{ product.product_no }}</p>
-                        <p><strong>Name:</strong> {{ product.name }}</p>
-                        <p><strong>Description:</strong> {{ product.description }}</p>
+                        <p><strong>Product Code:</strong> {{ product.product_no }}</p>
+                        <hr>
                         
-                        {% if user_type == 'owner' %}
-                            <hr>
-                            <p><strong>💰 Cost Price:</strong> ₹{{ product.cost_price }}</p>
-                            <p><strong>📈 Profit:</strong> ₹{{ (product.price - product.cost_price) | round(2) }}</p>
-                            <p><strong>📊 Profit Margin:</strong> {{ ((product.price - product.cost_price) / product.price * 100) | round(2) }}%</p>
-                            <hr>
-                        {% endif %}
-                        
-                        <p><strong>💵 Selling Price:</strong> ₹{{ product.price }}</p>
-                        <p><strong>📦 Stock:</strong> {{ product.stock }} units</p>
-                        <p><strong>🔖 Barcode:</strong> {{ product.barcode }}</p>
+                        {% for key, value in product.items() %}
+                            {% if key != 'product_no' %}
+                                <p><strong>{{ key | replace('_', ' ') | title }}:</strong> 
+                                    {% if key == 'cost_price' %}
+                                        ₹{{ value }}
+                                    {% elif key == 'price' %}
+                                        ₹{{ value }}
+                                    {% elif key == 'stock' %}
+                                        {{ value }} units
+                                    {% else %}
+                                        {{ value }}
+                                    {% endif %}
+                                </p>
+                            {% endif %}
+                        {% endfor %}
                     </div>
                 </div>
                 {% endif %}
