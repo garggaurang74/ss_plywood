@@ -100,15 +100,34 @@ def search():
     if 'user_type' not in session:
         return redirect(url_for('login'))
     
+    # Check if employees are disabled
+    disable_file = 'employee_disabled.txt'
+    if session['user_type'] == 'employee' and os.path.exists(disable_file):
+        session.pop('user_type', None)
+        return render_template('login.html', error='Employee access is currently disabled by owner. Please contact your manager.')
+    
+    # Check if there's a logout timestamp (force logout all employees)
+    logout_timestamp_file = 'employee_logout_timestamp.txt'
+    if session['user_type'] == 'employee' and os.path.exists(logout_timestamp_file):
+        session.pop('user_type', None)
+        return render_template('login.html', error='Your session has been terminated by the owner. Please login again.')
+    
     product = None
+    search_performed = False
+    searched_identifier = ''
+    
     if request.method == 'POST':
         identifier = request.form.get('identifier', '').strip()
         if identifier:
+            search_performed = True
+            searched_identifier = identifier
             product = get_product_info(identifier, session['user_type'])
     
     return render_template('search.html', 
                          user_type=session['user_type'],
                          product=product,
+                         search_performed=search_performed,
+                         searched_identifier=searched_identifier,
                          brand_name="S.S Plywood")
 
 @app.route('/api/product/<identifier>')
@@ -116,16 +135,95 @@ def api_product(identifier):
     if 'user_type' not in session:
         return jsonify({'error': 'Not authenticated'}), 401
     
+    # Check if employees are disabled or logged out
+    disable_file = 'employee_disabled.txt'
+    logout_timestamp_file = 'employee_logout_timestamp.txt'
+    if session['user_type'] == 'employee' and (os.path.exists(disable_file) or os.path.exists(logout_timestamp_file)):
+        session.pop('user_type', None)
+        return jsonify({'error': 'Access denied. Employee access has been disabled.'}), 403
+    
     product = get_product_info(identifier, session['user_type'])
     if product:
         return jsonify(product)
     return jsonify({'error': 'Product not found'}), 404
 
 
+@app.route('/logout-employee', methods=['POST'])
+def logout_employee():
+    if 'user_type' not in session or session['user_type'] != 'owner':
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    try:
+        # Create a file to disable employee access
+        disable_file = 'employee_disabled.txt'
+        with open(disable_file, 'w') as f:
+            f.write('disabled')
+        
+        # Create a logout timestamp file to force all employee sessions to logout
+        logout_timestamp_file = 'employee_logout_timestamp.txt'
+        import time
+        with open(logout_timestamp_file, 'w') as f:
+            f.write(str(time.time()))
+        
+        return jsonify({'success': True, 'message': 'All employees have been logged out and access disabled'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/enable-employee', methods=['POST'])
+def enable_employee():
+    if 'user_type' not in session or session['user_type'] != 'owner':
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    try:
+        # Remove the disable file to re-enable access
+        disable_file = 'employee_disabled.txt'
+        if os.path.exists(disable_file):
+            os.remove(disable_file)
+        
+        # Also remove the logout timestamp file
+        logout_timestamp_file = 'employee_logout_timestamp.txt'
+        if os.path.exists(logout_timestamp_file):
+            os.remove(logout_timestamp_file)
+        
+        return jsonify({'success': True, 'message': 'Employee access has been re-enabled'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/manage', methods=['GET'])
+def manage():
+    if 'user_type' not in session or session['user_type'] != 'owner':
+        return redirect(url_for('login'))
+    
+    try:
+        # Only owner can see manage page - owner sheet only
+        df = pd.read_excel(EXCEL_FILE, sheet_name='owner')
+        products = df.to_dict('records')
+    except:
+        products = []
+    
+    return render_template('manage.html', 
+                         user_type=session['user_type'],
+                         products=products)
+
+
 @app.route('/settings', methods=['GET', 'POST'])
 def settings():
     if 'user_type' not in session or session['user_type'] != 'owner':
         return redirect(url_for('login'))
+    
+    # Get current passwords
+    current_passwords = {'owner': '', 'employee': ''}
+    try:
+        creds_df = pd.read_excel(CREDENTIALS_FILE)
+        for _, row in creds_df.iterrows():
+            if row['user_type'] == 'owner':
+                current_passwords['owner'] = row['password']
+            elif row['user_type'] == 'employee':
+                current_passwords['employee'] = row['password']
+    except:
+        pass
     
     if request.method == 'POST':
         try:
@@ -135,6 +233,8 @@ def settings():
             if not owner_password or not employee_password:
                 return render_template('settings.html', 
                                      user_type=session['user_type'],
+                                     current_owner_password=current_passwords['owner'],
+                                     current_employee_password=current_passwords['employee'],
                                      error='Both passwords are required')
             
             # Update credentials file
@@ -146,13 +246,20 @@ def settings():
             
             return render_template('settings.html', 
                                  user_type=session['user_type'],
+                                 current_owner_password=owner_password,
+                                 current_employee_password=employee_password,
                                  success='Passwords updated successfully!')
         except Exception as e:
             return render_template('settings.html', 
                                  user_type=session['user_type'],
+                                 current_owner_password=current_passwords['owner'],
+                                 current_employee_password=current_passwords['employee'],
                                  error=f'Error updating passwords: {str(e)}')
     
-    return render_template('settings.html', user_type=session['user_type'])
+    return render_template('settings.html', 
+                         user_type=session['user_type'],
+                         current_owner_password=current_passwords['owner'],
+                         current_employee_password=current_passwords['employee'])
 
 if __name__ == '__main__':
     import sys
